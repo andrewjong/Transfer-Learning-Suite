@@ -43,7 +43,9 @@ This project has the following dependencies:
 
 - Numpy `sudo pip install numpy`
 
-- OpenCV Python `sudo apt-get install python-opencv`
+- Matplotlib `sudo pip install matplotlib`
+
+- OpenCV Python `sudo apt-get install opencv-python`
 
 - TensorFlow `sudo pip install --upgrade tensorflow-gpu`
 
