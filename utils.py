@@ -1,8 +1,9 @@
 # Layers
-from keras.layers import Dense, Activation, Flatten, Dropout
+from keras.layers import Dense, Activation, Flatten, Dropout, Add, BatchNormalization
 from keras import backend as K
 
 # Other
+import keras
 from keras import optimizers
 from keras import losses
 from keras.optimizers import SGD, Adam
@@ -20,12 +21,32 @@ import cv2
 import time, datetime
 
 
-def save_class_list(class_list, model_name, dataset_name):
+class FixedThenFinetune(keras.callbacks.Callback):
+    """
+    Don't use this. Need to compile model
+    """
+    def __init__(self, switch_epoch):
+        """
+        switch_epoch: the epoch to unfreeze all model layers
+        """
+        self.switch_epoch = switch_epoch
+        self.switched = False
+
+
+    def on_epoch_begin(self, epoch, logs):
+        if not self.switched and epoch > self.switch_epoch:
+            print("Switching from fixed to finetune. Setting all model params as trainable.")
+            set_trainable(self.model, True)
+            self.model.compile(self.model.optimizer, self.model.loss, metrics=self.model._compile_metrics)
+            self.switched = True
+
+
+def save_class_list(OUT_DIR, class_list, model_name, dataset_name):
     class_list.sort()
-    target=open("./checkpoints/" + model_name + "_" + dataset_name + "_class_list.txt",'w')
-    for c in class_list:
-        target.write(c)
-        target.write("\n")
+    with open(os.path.join(OUT_DIR, model_name + "_" + dataset_name + "_class_list.txt"),'w') as target:
+        for c in class_list:
+            target.write(c)
+            target.write("\n")
 
 def load_class_list(class_list_file):
     class_list = []
@@ -52,16 +73,25 @@ def get_num_files(directory):
             cnt += len(glob.glob(os.path.join(r, dr + "/*")))
     return cnt
 
+def set_trainable(model, is_trainable):
+    for layer in model.layers:
+        layer.trainable = is_trainable
+
 # Add on new FC layers with dropout for fine tuning
-def build_finetune_model(base_model, dropout, fc_layers, num_classes):
-    for layer in base_model.layers:
-        layer.trainable = False
+def build_finetune_model(base_model, dropout, fc_layers, num_classes, as_fixed_feature_extractor=True, skip_interval=0):
+    if as_fixed_feature_extractor:
+        set_trainable(base_model, False)
 
     x = base_model.output
     x = Flatten()(x)
-    for fc in fc_layers:
+    for i, fc in enumerate(fc_layers):
         x = Dense(fc, activation='relu')(x) # New FC layer, random init
         x = Dropout(dropout)(x)
+        x = BatchNormalization()(x)
+        if skip_interval and i % skip_interval == 0:
+            if i > 0:
+                x = Add()([x, previous])
+            previous = x
 
     predictions = Dense(num_classes, activation='softmax')(x) # New softmax layer
     

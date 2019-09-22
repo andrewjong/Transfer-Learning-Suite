@@ -22,7 +22,10 @@ from keras import optimizers
 from keras import losses
 from keras.optimizers import SGD, Adam
 from keras.models import Sequential, Model
-from keras.callbacks import ModelCheckpoint, LearningRateScheduler
+from keras.callbacks import CSVLogger, ModelCheckpoint, LearningRateScheduler
+from keras.callbacks import CSVLogger
+
+
 from keras.models import load_model
 
 # Utils
@@ -32,10 +35,24 @@ import argparse
 import random, glob
 import os, sys, csv
 import cv2
+import json
 import time, datetime
 
 # Files
 import utils
+from utils import FixedThenFinetune
+
+from tensorflow.compat.v1 import ConfigProto
+from tensorflow.compat.v1 import InteractiveSession
+
+# fix cudnn errors
+import keras
+config = ConfigProto()
+config.gpu_options.allow_growth = True
+session = InteractiveSession(config=config)
+keras.backend.tensorflow_backend.set_session(session)
+
+
 
 # For boolean input from the command line
 def str2bool(v):
@@ -48,23 +65,34 @@ def str2bool(v):
 
 
 # Command line args
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument('--name', default="my_experiment", help='name to save')
+parser.add_argument('--from_epoch', type=int, default=0, help='starter epoch (for logging)')
 parser.add_argument('--num_epochs', type=int, default=20, help='Number of epochs to train for')
+parser.add_argument('--finetune_epochs', type=int, default=10, help='Number of epochs to finetune AFTER training fixed')
 parser.add_argument('--mode', type=str, default="train", help='Select "train", or "predict" mode. \
     Note that for prediction mode you have to specify an image to run the model on.')
 parser.add_argument('--image', type=str, default=None, help='The image you want to predict on. Only valid in "predict" mode.')
-parser.add_argument('--continue_training', type=str2bool, default=False, help='Whether to continue training from a checkpoint')
+parser.add_argument('--continue_training', help='path to model to continue training')
+parser.add_argument('--transfer-strategy', default="fixed", help='strategy for transfer learning. "fixed" treats the pretrained model as a fixed feature extractor; "finetune" tunes all layers', choices=("fixed", "finetune"))
 parser.add_argument('--dataset', type=str, default="Pets", help='Dataset you are using.')
+parser.add_argument('--max_steps', type=int, help='max steps for training')
 parser.add_argument('--resize_height', type=int, default=224, help='Height of cropped input image to network')
 parser.add_argument('--resize_width', type=int, default=224, help='Width of cropped input image to network')
 parser.add_argument('--batch_size', type=int, default=32, help='Number of images in each batch')
-parser.add_argument('--dropout', type=float, default=1e-3, help='Dropout ratio')
-parser.add_argument('--h_flip', type=str2bool, default=False, help='Whether to randomly flip the image horizontally for data augmentation')
-parser.add_argument('--v_flip', type=str2bool, default=False, help='Whether to randomly flip the image vertically for data augmentation')
-parser.add_argument('--rotation', type=float, default=0.0, help='Whether to randomly rotate the image for data augmentation')
-parser.add_argument('--zoom', type=float, default=0.0, help='Whether to randomly zoom in for data augmentation')
-parser.add_argument('--shear', type=float, default=0.0, help='Whether to randomly shear in for data augmentation')
+parser.add_argument('--h_flip', action="store_true", help='add to randomly flip the image horizontally for data augmentation')
+parser.add_argument('--v_flip', action="store_true", help='add to randomly flip the image vertically for data augmentation')
+parser.add_argument('--rotation', type=int, default=0, help='Degrees to randomly rotate the image for data augmentation')
+parser.add_argument('--zoom', type=float, default=0.0, help='Range for random zoom')
+parser.add_argument('--shear', type=float, default=0.0, help='Shear intensity in degrees')
 parser.add_argument('--model', type=str, default="MobileNet", help='Your pre-trained classification model of choice')
+parser.add_argument('--summarize_model', action="store_true", help='print model summary')
+parser.add_argument("--num_fc", type=int, default=4, help="number of FC layers to add")
+parser.add_argument("--fc_width", type=int, default=256, help="width of FC channels")
+parser.add_argument('--dropout', type=float, default=1e-3, help='Dropout ratio')
+parser.add_argument('--skip_interval', type=int, default=2, help='interval to add skip connection')
+parser.add_argument("--optimizer", default="Adam", help="optimizer class name")
+parser.add_argument("--lr", default=0.00001, type=float, help="initial learning rate")
 args = parser.parse_args()
 
 
@@ -72,14 +100,24 @@ args = parser.parse_args()
 BATCH_SIZE = args.batch_size
 WIDTH = args.resize_width
 HEIGHT = args.resize_height
-FC_LAYERS = [1024, 1024]
+FC_LAYERS = [args.fc_width for _ in range(args.num_fc)]
 TRAIN_DIR = args.dataset + "/train/"
 VAL_DIR = args.dataset + "/val/"
+OUT_DIR = os.path.join("checkpoints", args.name)
 
 preprocessing_function = None
 base_model = None
 
+# Create directories if needed
+if not os.path.isdir(OUT_DIR):
+    os.makedirs(OUT_DIR)
+else:
+    if input(OUT_DIR + " already exists, are you sure you want to overwrite? (y/N): ").lower() != "y":
+        exit()
 
+# save args
+with open(os.path.join(OUT_DIR, "args.json"), "w") as f:
+    json.dump(vars(args), f, sort_keys=True, indent=4)
 
 # Prepare the model
 if args.model == "VGG16":
@@ -137,11 +175,17 @@ else:
 if args.mode == "train":
     print("\n***** Begin training *****")
     print("Dataset -->", args.dataset)
-    print("Model -->", args.model)
     print("Resize Height -->", args.resize_height)
     print("Resize Width -->", args.resize_width)
     print("Num Epochs -->", args.num_epochs)
     print("Batch Size -->", args.batch_size)
+
+    print("Model:")
+    print("\tBase Model -->", args.model)
+    print("\tNumber top layers -->", args.num_fc)
+    print("\tTop layer width -->", args.fc_width)
+    print("\tSkip connection interval -->", args.skip_interval)
+    print("\tDropout -->", args.dropout)
 
     print("Data Augmentation:")
     print("\tVertical Flip -->", args.v_flip)
@@ -151,10 +195,6 @@ if args.mode == "train":
     print("\tShear -->", args.shear)
     print("")
 
-    # Create directories if needed
-    if not os.path.isdir("checkpoints"):
-        os.makedirs("checkpoints")
-
     # Prepare data generators
     train_datagen =  ImageDataGenerator(
       preprocessing_function=preprocessing_function,
@@ -162,7 +202,8 @@ if args.mode == "train":
       shear_range=args.shear,
       zoom_range=args.zoom,
       horizontal_flip=args.h_flip,
-      vertical_flip=args.v_flip
+      vertical_flip=args.v_flip,
+      rescale=1./255,
     )
 
     val_datagen = ImageDataGenerator(preprocessing_function=preprocessing_function)
@@ -174,15 +215,19 @@ if args.mode == "train":
 
     # Save the list of classes for prediction mode later
     class_list = utils.get_subfolders(TRAIN_DIR)
-    utils.save_class_list(class_list, model_name=args.model, dataset_name=args.dataset)
+    utils.save_class_list(OUT_DIR, class_list, model_name=args.model, dataset_name=os.path.basename(args.dataset))
 
-    finetune_model = utils.build_finetune_model(base_model, dropout=args.dropout, fc_layers=FC_LAYERS, num_classes=len(class_list))
+    optim = eval(args.optimizer)(lr=args.lr)
+    if args.continue_training is not None:
+        finetune_model = load_model(args.continue_training)
+        if args.transfer_strategy == "finetune":
+            utils.set_trainable(finetune_model, True)
+    else:
+        finetune_model = utils.build_finetune_model(base_model, dropout=args.dropout, fc_layers=FC_LAYERS, num_classes=len(class_list), as_fixed_feature_extractor=True if args.transfer_strategy=="fixed" else False, skip_interval=args.skip_interval)
 
-    if args.continue_training:
-        finetune_model.load_weights("./checkpoints/" + args.model + "_model_weights.h5")
-
-    adam = Adam(lr=0.00001)
-    finetune_model.compile(adam, loss='categorical_crossentropy', metrics=['accuracy'])
+    finetune_model.compile(optim, loss='categorical_crossentropy', metrics=['accuracy'])
+    if args.summarize_model:
+        finetune_model.summary()
 
     num_train_images = utils.get_num_files(TRAIN_DIR)
     num_val_images = utils.get_num_files(VAL_DIR)
@@ -196,16 +241,22 @@ if args.mode == "train":
 
     learning_rate_schedule = LearningRateScheduler(lr_decay)
 
-    filepath="./checkpoints/" + args.model + "_model_weights.h5"
-    checkpoint = ModelCheckpoint(filepath, monitor=["acc"], verbose=1, mode='max')
-    callbacks_list = [checkpoint]
+    # setup checkpoints
+    csv_logger = CSVLogger(os.path.join(OUT_DIR, 'log.csv'), append=True, separator=';')
 
+    latest_filepath=os.path.join(OUT_DIR, args.model + "_model_latest.h5") 
+    latest_checkpoint = ModelCheckpoint(latest_filepath, monitor="accuracy", verbose=1)
 
-    history = finetune_model.fit_generator(train_generator, epochs=args.num_epochs, workers=8, steps_per_epoch=num_train_images // BATCH_SIZE, 
-        validation_data=validation_generator, validation_steps=num_val_images // BATCH_SIZE, class_weight='auto', shuffle=True, callbacks=callbacks_list)
+    best_filepath=os.path.join(OUT_DIR, args.model + "_model_best.h5") 
+    best_checkpoint = ModelCheckpoint(best_filepath, monitor="val_accuracy", verbose=1, save_best_only=True, mode='max')
 
+    change_transfer_strategy = FixedThenFinetune(args.from_epoch + args.num_epochs)
 
-    plot_training(history)
+    callbacks_list = [csv_logger, change_transfer_strategy, latest_checkpoint, best_checkpoint]
+
+    history = finetune_model.fit_generator(train_generator, initial_epoch=args.from_epoch, epochs=args.num_epochs+args.finetune_epochs, workers=8, steps_per_epoch=args.max_steps, validation_data=validation_generator, validation_steps=num_val_images // BATCH_SIZE, class_weight='auto', shuffle=True, callbacks=callbacks_list)
+
+    utils.plot_training(history)
 
 elif args.mode == "predict":
 
@@ -222,12 +273,11 @@ elif args.mode == "predict":
     image = np.float32(cv2.resize(image, (HEIGHT, WIDTH)))
     image = preprocessing_function(image.reshape(1, HEIGHT, WIDTH, 3))
 
-    class_list_file = "./checkpoints/" + args.model + "_" + args.dataset + "_class_list.txt"
+    class_list_file = os.path.join(OUT_DIR, args.model + "_" + os.path.basename(args.dataset) + "_class_list.txt")
 
     class_list = utils.load_class_list(class_list_file)
     
-    finetune_model = utils.build_finetune_model(base_model, len(class_list))
-    finetune_model.load_weights("./checkpoints/" + args.model + "_model_weights.h5")
+    finetune_model = load_model(args.continue_train)
 
     # Run the classifier and print results
     st = time.time()
