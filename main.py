@@ -85,6 +85,7 @@ parser.add_argument('--v_flip', action="store_true", help='add to randomly flip 
 parser.add_argument('--rotation', type=int, default=0, help='Degrees to randomly rotate the image for data augmentation')
 parser.add_argument('--zoom', type=float, default=0.0, help='Range for random zoom')
 parser.add_argument('--shear', type=float, default=0.0, help='Shear intensity in degrees')
+parser.add_argument('--brightness_offset', type=float, default=0.0, help='Brightness difference')
 parser.add_argument('--model', type=str, default="MobileNet", help='Your pre-trained classification model of choice')
 parser.add_argument('--summarize_model', action="store_true", help='print model summary')
 parser.add_argument("--num_fc", type=int, default=4, help="number of FC layers to add")
@@ -203,6 +204,7 @@ if args.mode == "train":
       zoom_range=args.zoom,
       horizontal_flip=args.h_flip,
       vertical_flip=args.v_flip,
+      brightness_range=[1.0 - args.brightness_offset, 1.0 + args.brightness_offset],
       rescale=1./255,
     )
 
