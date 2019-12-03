@@ -53,18 +53,13 @@ class CIFAR10Sequence(Sequence):
         # self.augment(image='*.jpg')
         # augmentations like randomBrightnessContrast has two branches, one is for image type uint8
         # use img_as_ubyte to convert image type
-        return (
-            np.stack(
-                [
-                    self.augment(
-                        image=np.array(Image.open(x).resize((self.width, self.height)))
-                    )["image"]
-                    for x in batch_x
-                ],
-                axis=0,
-            ),
-            np.array(batch_y),
-        )
+        transformed_x = []
+        for x in batch_x:
+            img = np.array(Image.open(x).resize((self.width, self.height)))
+            aug = self.augment(img)
+            transformed_x.append(aug)
+
+        return np.stack(transformed_x, axis=0), np.array(batch_y)
 
 
 """
