@@ -27,8 +27,6 @@ class CIFAR10Sequence(Sequence):
                 y_class_names.extend([name] * len(class_img_paths))
         # image_paths: each element: 'path_to_class_folder/image_name.jpg'
         # y should be uint8 array of categorical labels
-        print(f"Found {len(y_class_names)} classes:")
-        print(y_class_names)
         label_encoder = LabelEncoder()
         # ex of y:[[2], [1], [1], [0], [2]], got from observing load_training_data()
         # to_categorical works on y value 0-numOfClasses, shape of return automatically be the same as above
@@ -37,6 +35,7 @@ class CIFAR10Sequence(Sequence):
             image_paths,
             to_categorical(label_encoder.fit_transform(y_class_names)).astype(np.uint8),
         )
+        print(f"Classes found: {len(label_encoder.classes_)}")
         self.batch_size = batch_size
         # augmentations passed in, can be composed augmentations
         self.augment = augmentations
