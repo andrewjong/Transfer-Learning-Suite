@@ -55,8 +55,9 @@ class CIFAR10Sequence(Sequence):
         # use img_as_ubyte to convert image type
         transformed_x = []
         for x in batch_x:
-            img = np.array(Image.open(x).resize((self.width, self.height)))
-            aug = self.augment(img)
+            pil = Image.open(x).convert("RGBA").resize((self.width, self.height))
+            img = np.array(pil)[:, :, :3]  # save only rgb
+            aug = self.augment(image=img)["image"]
             transformed_x.append(aug)
 
         return np.stack(transformed_x, axis=0), np.array(batch_y)
