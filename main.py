@@ -398,45 +398,56 @@ if args.mode == "train":
     # Prepare data generators
 
     def strong_aug(p=1.0):
-        return Compose([
-            RandomSizedCrop((100, HEIGHT), HEIGHT, WIDTH, w2h_ratio=1.0, p=1.0),
-            Compose(
-                [
-                    Flip(),
-                    RandomRotate90(),
-                    Transpose(),
-                    OneOf([IAAAdditiveGaussianNoise(), GaussNoise()], p=0.2),
-                    OneOf([MedianBlur(blur_limit=3), Blur(blur_limit=3), MotionBlur()]),
-                    ShiftScaleRotate(args.shift, args.scale, args.rotate),
-                    # min_max_height: (height of crop before resizing)
-                    # crop_height = randint(min_height, max_height), endpoints included
-                    # crop_width = crop_height * w2h_ratio
-                    # height, width: height/width after crop and resize, for convenience, just use args for resize
-
-                    OneOf([GridDistortion(p=0.5), ElasticTransform(p=0.5), IAAPerspective(), IAAPiecewiseAffine()]),
-                    OneOf(
-                        [
-                            RGBShift(args.r_shift, args.g_shift, args.b_shift),
-                            HueSaturationValue(
-                                args.hue_shift, args.sat_shift, args.val_shift
-                            ),
-#                     ChannelShuffle(),
-                            CLAHE(args.clip),
-                            RandomBrightnessContrast(args.brightness, args.contrast),
-                            RandomGamma(gamma_limit=(80, 120)),
-    #                     ToGray(),
-                            ImageCompression(quality_lower=75, quality_upper=100),
-                        ]
-                    ),
-
-                ],
-                p=p,
-            ),
-            ToFloat(max_value=255),
-        ])
+        return Compose(
+            [
+                RandomSizedCrop((100, HEIGHT), HEIGHT, WIDTH, w2h_ratio=1.0, p=1.0),
+                Compose(
+                    [
+                        Flip(),
+                        RandomRotate90(),
+                        Transpose(),
+                        OneOf([IAAAdditiveGaussianNoise(), GaussNoise()], p=0.2),
+                        OneOf(
+                            [MedianBlur(blur_limit=3), Blur(blur_limit=3), MotionBlur()]
+                        ),
+                        ShiftScaleRotate(args.shift, args.scale, args.rotate),
+                        # min_max_height: (height of crop before resizing)
+                        # crop_height = randint(min_height, max_height), endpoints included
+                        # crop_width = crop_height * w2h_ratio
+                        # height, width: height/width after crop and resize, for convenience, just use args for resize
+                        OneOf(
+                            [
+                                GridDistortion(p=0.5),
+                                ElasticTransform(p=0.5),
+                                IAAPerspective(),
+                                IAAPiecewiseAffine(),
+                            ]
+                        ),
+                        OneOf(
+                            [
+                                RGBShift(args.r_shift, args.g_shift, args.b_shift),
+                                HueSaturationValue(
+                                    args.hue_shift, args.sat_shift, args.val_shift
+                                ),
+                                #                     ChannelShuffle(),
+                                CLAHE(args.clip),
+                                RandomBrightnessContrast(
+                                    args.brightness, args.contrast
+                                ),
+                                RandomGamma(gamma_limit=(80, 120)),
+                                #                     ToGray(),
+                                ImageCompression(quality_lower=75, quality_upper=100),
+                            ]
+                        ),
+                    ],
+                    p=p,
+                ),
+                ToFloat(max_value=255),
+            ]
+        )
 
     AUGMENTATIONS_TRAIN = strong_aug(0.75)
-    AUGMENTATIONS_TEST = Compose([Resize(WIDTH,HEIGHT), ToFloat(max_value=255)])
+    AUGMENTATIONS_TEST = Compose([Resize(WIDTH, HEIGHT), ToFloat(max_value=255)])
 
     train_generator = CIFAR10Sequence(
         TRAIN_DIR, BATCH_SIZE, AUGMENTATIONS_TRAIN, WIDTH, HEIGHT

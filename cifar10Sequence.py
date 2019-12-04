@@ -8,9 +8,16 @@ from keras.utils import to_categorical
 from sklearn.preprocessing import LabelEncoder
 import sklearn.utils as skutils
 
+
 class CIFAR10Sequence(Sequence):
     def __init__(
-        self, directory_of_train_or_val, batch_size, augmentations, width, height, shuffle=True
+        self,
+        directory_of_train_or_val,
+        batch_size,
+        augmentations,
+        width,
+        height,
+        shuffle=True,
     ):
         # Here, self.x is list of path to the images
         # and self.y are the associated classes.
@@ -57,8 +64,8 @@ class CIFAR10Sequence(Sequence):
         # use img_as_ubyte to convert image type
         transformed_x = []
         for x in batch_x:
-            pil = Image.open(x).convert("RGB").resize((224,224))
-            img = np.array(pil)[:,:,:3] # save only rgb
+            pil = Image.open(x).convert("RGB").resize((224, 224))
+            img = np.array(pil)[:, :, :3]  # save only rgb
             aug = self.augment(image=img)["image"]
             transformed_x.append(aug)
 
