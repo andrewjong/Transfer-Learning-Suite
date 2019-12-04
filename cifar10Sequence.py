@@ -6,11 +6,11 @@ from PIL import Image
 from keras.utils import Sequence
 from keras.utils import to_categorical
 from sklearn.preprocessing import LabelEncoder
-
+import sklearn.utils as skutils
 
 class CIFAR10Sequence(Sequence):
     def __init__(
-        self, directory_of_train_or_val, batch_size, augmentations, width, height
+        self, directory_of_train_or_val, batch_size, augmentations, width, height, shuffle=True
     ):
         # Here, self.x is list of path to the images
         # and self.y are the associated classes.
@@ -35,6 +35,8 @@ class CIFAR10Sequence(Sequence):
             image_paths,
             to_categorical(label_encoder.fit_transform(y_class_names)).astype(np.uint8),
         )
+        if shuffle:
+            self.x, self.y = skutils.shuffle(self.x, self.y)
         print(f"Classes found: {len(label_encoder.classes_)}")
         self.batch_size = batch_size
         # augmentations passed in, can be composed augmentations
@@ -55,26 +57,9 @@ class CIFAR10Sequence(Sequence):
         # use img_as_ubyte to convert image type
         transformed_x = []
         for x in batch_x:
-            pil = Image.open(x).convert("RGBA").resize((self.width, self.height))
-            img = np.array(pil)[:, :, :3]  # save only rgb
+            pil = Image.open(x).convert("RGB").resize((224,224))
+            img = np.array(pil)[:,:,:3] # save only rgb
             aug = self.augment(image=img)["image"]
             transformed_x.append(aug)
 
         return np.stack(transformed_x, axis=0), np.array(batch_y)
-
-
-"""
-# Define callbacks
-callbacks = [
-    tf.keras.callbacks.TensorBoard(log_dir=hparams.checkpoint_dir)
-]
-"""
-"""
-# Training
-resnet_model.fit_generator(
-    train_gen,
-    epochs=hparams.n_epochs,
-    validation_data=valid_gen,
-    workers=2, use_multiprocessing=False,
-    callbacks=callbacks)
-"""

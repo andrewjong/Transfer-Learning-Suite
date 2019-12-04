@@ -48,6 +48,7 @@ import tensorflow.compat.v1
 from cifar10Sequence import CIFAR10Sequence
 import cv2
 from albumentations import (
+    Resize,
     Compose,
     OneOf,
     Flip,
@@ -63,12 +64,15 @@ from albumentations import (
     RandomGamma,
     Blur,
     MedianBlur,
+    MotionBlur,
     ToGray,
     ImageCompression,
     GridDistortion,
     ElasticTransform,
     ToFloat,
     IAAAdditiveGaussianNoise,
+    IAAPerspective,
+    IAAPiecewiseAffine,
     GaussNoise,
 )
 from PIL import Image
@@ -171,22 +175,22 @@ parser.add_argument("--rotate", type=float, default=45, help="rotation range")
 parser.add_argument(
     "--r_shift",
     type=int,
-    default=20,
+    default=10,
     help="range for changing values for the red channel",
 )
 parser.add_argument(
     "--g_shift",
     type=int,
-    default=20,
+    default=10,
     help="range for changing values for the green channel",
 )
 parser.add_argument(
     "--b_shift",
     type=int,
-    default=20,
+    default=10,
     help="range for changing values for the blue channel",
 )
-parser.add_argument("--hue_shift", type=int, default=20, help="range for changing hue")
+parser.add_argument("--hue_shift", type=int, default=10, help="range for changing hue")
 parser.add_argument(
     "--sat_shift", type=int, default=30, help="range for changing saturation"
 )
@@ -393,42 +397,46 @@ if args.mode == "train":
     # Task for Yulan: When an image is loaded, augment the image using Albumentations
     # Prepare data generators
 
-    def strong_aug(p=0.5):
-        return Compose(
-            [
-                Flip(),
-                RandomRotate90(),
-                Transpose(),
-                OneOf([IAAAdditiveGaussianNoise(), GaussNoise()], p=0.2),
-                OneOf([MedianBlur(blur_limit=3), Blur(blur_limit=3)]),
-                ShiftScaleRotate(args.shift, args.scale, args.rotate),
-                # min_max_height: (height of crop before resizing)
-                # crop_height = randint(min_height, max_height), endpoints included
-                # crop_width = crop_height * w2h_ratio
-                # height, width: height/width after crop and resize, for convenience, just use args for resize
-                RandomSizedCrop((1, HEIGHT), HEIGHT, WIDTH, w2h_ratio=1.0, p=1.0),
-                OneOf([GridDistortion(p=0.1), ElasticTransform(p=0.3)]),
-                OneOf(
-                    [
-                        RGBShift(args.r_shift, args.g_shift, args.b_shift),
-                        HueSaturationValue(
-                            args.hue_shift, args.sat_shift, args.val_shift
-                        ),
-                        ChannelShuffle(),
-                        CLAHE(args.clip),
-                        RandomBrightnessContrast(args.brightness, args.contrast),
-                        RandomGamma(gamma_limit=(80, 120)),
-                        ToGray(),
-                        ImageCompression(quality_lower=99, quality_upper=100),
-                    ]
-                ),
-                ToFloat(max_value=255),
-            ],
-            p=p,
-        )
+    def strong_aug(p=1.0):
+        return Compose([
+            RandomSizedCrop((100, HEIGHT), HEIGHT, WIDTH, w2h_ratio=1.0, p=1.0),
+            Compose(
+                [
+                    Flip(),
+                    RandomRotate90(),
+                    Transpose(),
+                    OneOf([IAAAdditiveGaussianNoise(), GaussNoise()], p=0.2),
+                    OneOf([MedianBlur(blur_limit=3), Blur(blur_limit=3), MotionBlur()]),
+                    ShiftScaleRotate(args.shift, args.scale, args.rotate),
+                    # min_max_height: (height of crop before resizing)
+                    # crop_height = randint(min_height, max_height), endpoints included
+                    # crop_width = crop_height * w2h_ratio
+                    # height, width: height/width after crop and resize, for convenience, just use args for resize
 
-    AUGMENTATIONS_TRAIN = strong_aug(args.p)
-    AUGMENTATIONS_TEST = Compose([ToFloat(max_value=255)])
+                    OneOf([GridDistortion(p=0.5), ElasticTransform(p=0.5), IAAPerspective(), IAAPiecewiseAffine()]),
+                    OneOf(
+                        [
+                            RGBShift(args.r_shift, args.g_shift, args.b_shift),
+                            HueSaturationValue(
+                                args.hue_shift, args.sat_shift, args.val_shift
+                            ),
+#                     ChannelShuffle(),
+                            CLAHE(args.clip),
+                            RandomBrightnessContrast(args.brightness, args.contrast),
+                            RandomGamma(gamma_limit=(80, 120)),
+    #                     ToGray(),
+                            ImageCompression(quality_lower=75, quality_upper=100),
+                        ]
+                    ),
+
+                ],
+                p=p,
+            ),
+            ToFloat(max_value=255),
+        ])
+
+    AUGMENTATIONS_TRAIN = strong_aug(0.75)
+    AUGMENTATIONS_TEST = Compose([Resize(WIDTH,HEIGHT), ToFloat(max_value=255)])
 
     train_generator = CIFAR10Sequence(
         TRAIN_DIR, BATCH_SIZE, AUGMENTATIONS_TRAIN, WIDTH, HEIGHT
